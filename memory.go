@@ -39,7 +39,7 @@ type page struct {
 	used int
 }
 
-// Allocator allocates and frees memory. It's zero value is ready for use.
+// Allocator allocates and frees memory. Its zero value is ready for use.
 type Allocator struct {
 	cap     [64]int
 	lists   [64]*node
