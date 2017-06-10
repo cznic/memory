@@ -212,3 +212,19 @@ func Test3(t *testing.T) {
 		t.Fatalf("%+v", alloc)
 	}
 }
+
+func TestFree(t *testing.T) {
+	var alloc Allocator
+	b, err := alloc.Malloc(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := alloc.Free(b[:0]); err != nil {
+		t.Fatal(err)
+	}
+
+	if alloc.nallocs != 0 || alloc.npages != 0 || alloc.nbytes != 0 {
+		t.Fatalf("%+v", alloc)
+	}
+}

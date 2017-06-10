@@ -96,6 +96,7 @@ func (a *Allocator) Calloc(size int) ([]byte, error) {
 // Free deallocates memory (as in C.free). The argument of Free must have been
 // acquired from Calloc or Malloc or Realloc.
 func (a *Allocator) Free(b []byte) error {
+	b = b[:cap(b)]
 	a.nallocs--
 	p := (*page)(unsafe.Pointer(uintptr(unsafe.Pointer(&b[0])) &^ uintptr(pageMask)))
 	log := p.log
