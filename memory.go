@@ -210,16 +210,17 @@ func (a *Allocator) Malloc(size int) ([]byte, error) {
 // an error, if any.  The contents will be unchanged in the range from the
 // start of the region up to the minimum of the old and new  sizes.   If the
 // new size is larger than the old size, the added memory will not be
-// initialized.  If b is of zero size, then the call is equivalent to
-// Malloc(size), for all values of size; if size is equal to zero, and b is not
-// of zero size, then the call is equivalent to Free(b).  Unless b is of zero
-// size, it must have been returned by an earlier call to Malloc, Calloc or
-// Realloc.  If the area pointed to was moved, a Free(b) is done.
+// initialized.  If b's backing array is of zero size, then the call is
+// equivalent to Malloc(size), for all values of size; if size is equal to
+// zero, and b's backing array is not of zero size, then the call is equivalent
+// to Free(b).  Unless b's backing array is of zero size, it must have been
+// returned by an earlier call to Malloc, Calloc or Realloc.  If the area
+// pointed to was moved, a Free(b) is done.
 func (a *Allocator) Realloc(b []byte, size int) ([]byte, error) {
 	switch {
-	case len(b) == 0:
+	case cap(b) == 0:
 		return a.Malloc(size)
-	case size == 0 && len(b) != 0:
+	case size == 0 && cap(b) != 0:
 		return nil, a.Free(b)
 	case size <= cap(b):
 		return b[:size], nil
