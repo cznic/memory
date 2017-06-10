@@ -60,6 +60,7 @@ func (a *Allocator) newPage(size int) (*page, error) {
 	a.npages++
 	p := (*page)(unsafe.Pointer(&b[0]))
 	p.size = size
+	p.log = 0
 	return p, nil
 }
 
