@@ -159,7 +159,8 @@ func (a *Allocator) Malloc(size int) ([]byte, error) {
 	}
 
 	a.nallocs++
-	if size > maxSlotSize {
+	log := uint(mathutil.BitLen(roundup(size, mallocAllign) - 1))
+	if 1<<log > maxSlotSize {
 		p, err := a.newPage(size)
 		if err != nil {
 			return nil, err
@@ -173,7 +174,6 @@ func (a *Allocator) Malloc(size int) ([]byte, error) {
 		return b, nil
 	}
 
-	log := uint(mathutil.BitLen(roundup(size, mallocAllign) - 1))
 	if a.lists[log] == nil && a.pages[log] == nil {
 		if _, err := a.newSharedPage(log); err != nil {
 			return nil, err
