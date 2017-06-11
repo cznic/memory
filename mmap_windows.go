@@ -21,7 +21,7 @@ import (
 // We keep this map so that we can get back the original handle from the memory address.
 var handleMap = map[uintptr]syscall.Handle{}
 
-func mmap(size int) ([]byte, error) {
+func mmap0(size int) ([]byte, error) {
 	flProtect := uint32(syscall.PAGE_READWRITE)
 	dwDesiredAccess := uint32(syscall.FILE_MAP_WRITE)
 
@@ -44,7 +44,7 @@ func mmap(size int) ([]byte, error) {
 		return nil, os.NewSyscallError("MapViewOfFile", errno)
 	}
 
-	if addr&uintptr(pageMask) != 0 {
+	if addr&uintptr(osPageMask) != 0 {
 		panic("internal error")
 	}
 

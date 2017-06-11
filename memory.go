@@ -20,13 +20,44 @@ const (
 var (
 	headerSize  = roundup(int(unsafe.Sizeof(page{})), mallocAllign)
 	maxSlotSize = pageAvail >> 1
+	osPageMask  = osPageSize - 1
+	osPageSize  = os.Getpagesize()
 	pageAvail   = pageSize - headerSize
 	pageMask    = pageSize - 1
-	pageSize    = os.Getpagesize()
+	pageSize    = 1 << 20
 )
 
 // if n%m != 0 { n += m-n%m }. m must be a power of 2.
 func roundup(n, m int) int { return (n + m - 1) &^ (m - 1) }
+
+// pageSize aligned.
+func mmap(size int) ([]byte, error) {
+	size = roundup(size, osPageSize)
+	b, err := mmap0(size + pageSize)
+	if err != nil {
+		return nil, err
+	}
+
+	mod := int(uintptr(unsafe.Pointer(&b[0]))) & pageMask
+	if mod != 0 {
+		n := pageSize - mod
+		if err := unmap(unsafe.Pointer(&b[0]), n); err != nil {
+			return nil, err
+		}
+
+		b = b[n:]
+	}
+
+	if uintptr(unsafe.Pointer(&b[0]))&uintptr(pageMask) != 0 {
+		panic("internal error")
+	}
+
+	if err := unmap(unsafe.Pointer(&b[size]), len(b)-size); err != nil {
+		return nil, err
+	}
+
+	return b[:size:size], nil
+}
 
 type node struct {
 	prev, next *node
@@ -41,12 +72,12 @@ type page struct {
 
 // Allocator allocates and frees memory. Its zero value is ready for use.
 type Allocator struct {
-	cap     [64]int
-	lists   [64]*node
-	pages   [64]*page
-	nallocs int // # of allocs.
-	nbytes  int // Asked from OS.
-	npages  int // Asked from OS.
+	cap    [64]int
+	lists  [64]*node
+	pages  [64]*page
+	allocs int // # of allocs.
+	bytes  int // Asked from OS.
+	mmaps  int // Asked from OS.
 }
 
 func (a *Allocator) newPage(size int) (*page, error) {
@@ -56,8 +87,8 @@ func (a *Allocator) newPage(size int) (*page, error) {
 		return nil, err
 	}
 
-	a.nbytes += size
-	a.npages++
+	a.bytes += size
+	a.mmaps++
 	p := (*page)(unsafe.Pointer(&b[0]))
 	p.size = size
 	p.log = 0
@@ -65,17 +96,20 @@ func (a *Allocator) newPage(size int) (*page, error) {
 }
 
 func (a *Allocator) newSharedPage(log uint) (*page, error) {
-	b, err := mmap(pageSize)
+	if a.cap[log] == 0 {
+		a.cap[log] = pageAvail / (1 << log)
+	}
+	size := headerSize + a.cap[log]<<log
+	b, err := mmap(size)
 	if err != nil {
 		return nil, err
 	}
 
-	a.nbytes += pageSize
-	a.npages++
+	a.bytes += size
+	a.mmaps++
 	p := (*page)(unsafe.Pointer(&b[0]))
 	a.pages[log] = p
-	a.cap[log] = pageAvail >> log
-	p.size = pageSize
+	p.size = size
 	p.log = log
 	return p, nil
 }
@@ -97,12 +131,12 @@ func (a *Allocator) Calloc(size int) ([]byte, error) {
 // acquired from Calloc or Malloc or Realloc.
 func (a *Allocator) Free(b []byte) error {
 	b = b[:cap(b)]
-	a.nallocs--
+	a.allocs--
 	p := (*page)(unsafe.Pointer(uintptr(unsafe.Pointer(&b[0])) &^ uintptr(pageMask)))
 	log := p.log
 	if log == 0 {
-		a.npages--
-		a.nbytes -= p.size
+		a.mmaps--
+		a.bytes -= p.size
 		return unmap(unsafe.Pointer(p), p.size)
 	}
 
@@ -137,8 +171,8 @@ func (a *Allocator) Free(b []byte) error {
 	if a.pages[log] == p {
 		a.pages[log] = nil
 	}
-	a.npages--
-	a.nbytes -= p.size
+	a.mmaps--
+	a.bytes -= p.size
 	return unmap(unsafe.Pointer(p), p.size)
 }
 
@@ -149,7 +183,7 @@ func (a *Allocator) Free(b []byte) error {
 // It's ok to reslice the returned slice but the result of appending to it
 // cannot be passed to Free or Realloc as it may refer to a different backing
 // array afterwards.
-func (a *Allocator) Malloc(size int) ([]byte, error) {
+func (a *Allocator) Malloc(size int) (r []byte, _ error) {
 	if size < 0 {
 		panic("invalid malloc size")
 	}
@@ -158,7 +192,7 @@ func (a *Allocator) Malloc(size int) ([]byte, error) {
 		return nil, nil
 	}
 
-	a.nallocs++
+	a.allocs++
 	log := uint(mathutil.BitLen(roundup(size, mallocAllign) - 1))
 	if 1<<log > maxSlotSize {
 		p, err := a.newPage(size)

@@ -56,11 +56,14 @@ func init() {
 
 // ============================================================================
 
-const quota = 16 << 20
+const quota = 128 << 20
 
-var max = 2 * pageSize
+var (
+	max    = 2 * osPageSize
+	bigMax = 2 * pageSize
+)
 
-func Test1(t *testing.T) {
+func test1(t *testing.T, max int) {
 	var alloc Allocator
 	rem := quota
 	var a [][]byte
@@ -85,7 +88,7 @@ func Test1(t *testing.T) {
 			b[i] = byte(rng.Next())
 		}
 	}
-	t.Logf("allocs %v, pages %v, bytes %v, overhead %v bytes.", alloc.nallocs, alloc.npages, alloc.nbytes, alloc.nbytes-quota)
+	t.Logf("allocs %v, mmaps %v, bytes %v, overhead %v (%.2f%%).", alloc.allocs, alloc.mmaps, alloc.bytes, alloc.bytes-quota, 100*float64(alloc.bytes-quota)/quota)
 	rng.Seek(pos)
 	// Verify
 	for i, b := range a {
@@ -111,12 +114,15 @@ func Test1(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if alloc.nallocs != 0 || alloc.npages != 0 || alloc.nbytes != 0 {
+	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
 		t.Fatalf("%+v", alloc)
 	}
 }
 
-func Test2(t *testing.T) {
+func Test1Small(t *testing.T)    { test1(t, max) }
+func Test1Big(t *testing.T) { test1(t, bigMax) }
+
+func test2(t *testing.T, max int) {
 	var alloc Allocator
 	rem := quota
 	var a [][]byte
@@ -141,7 +147,7 @@ func Test2(t *testing.T) {
 			b[i] = byte(rng.Next())
 		}
 	}
-	t.Logf("allocs %v, pages %v, bytes %v, overhead %v bytes.", alloc.nallocs, alloc.npages, alloc.nbytes, alloc.nbytes-quota)
+	t.Logf("allocs %v, mmaps %v, bytes %v, overhead %v (%.2f%%).", alloc.allocs, alloc.mmaps, alloc.bytes, alloc.bytes-quota, 100*float64(alloc.bytes-quota)/quota)
 	rng.Seek(pos)
 	// Verify & free
 	for i, b := range a {
@@ -159,12 +165,15 @@ func Test2(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if alloc.nallocs != 0 || alloc.npages != 0 || alloc.nbytes != 0 {
+	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
 		t.Fatalf("%+v", alloc)
 	}
 }
 
-func Test3(t *testing.T) {
+func Test2Small(t *testing.T)    { test2(t, max) }
+func Test2Big(t *testing.T) { test2(t, bigMax) }
+
+func test3(t *testing.T, max int) {
 	var alloc Allocator
 	rem := quota
 	m := map[*[]byte][]byte{}
@@ -197,7 +206,7 @@ func Test3(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("allocs %v, pages %v, bytes %v, overhead %v bytes.", alloc.nallocs, alloc.npages, alloc.nbytes, alloc.nbytes-quota)
+	t.Logf("allocs %v, mmaps %v, bytes %v, overhead %v (%.2f%%).", alloc.allocs, alloc.mmaps, alloc.bytes, alloc.bytes-quota, 100*float64(alloc.bytes-quota)/quota)
 	for k, v := range m {
 		b := *k
 		if !bytes.Equal(b, v) {
@@ -209,10 +218,13 @@ func Test3(t *testing.T) {
 		}
 		alloc.Free(b)
 	}
-	if alloc.nallocs != 0 || alloc.npages != 0 || alloc.nbytes != 0 {
+	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
 		t.Fatalf("%+v", alloc)
 	}
 }
+
+func Test3Small(t *testing.T)    { test3(t, max) }
+func Test3Big(t *testing.T) { test3(t, bigMax) }
 
 func TestFree(t *testing.T) {
 	var alloc Allocator
@@ -225,7 +237,7 @@ func TestFree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if alloc.nallocs != 0 || alloc.npages != 0 || alloc.nbytes != 0 {
+	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
 		t.Fatalf("%+v", alloc)
 	}
 }
@@ -237,7 +249,7 @@ func TestMalloc(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p := (*page)(unsafe.Pointer(uintptr(unsafe.Pointer(&b[0])) &^ uintptr(pageMask)))
+	p := (*page)(unsafe.Pointer(uintptr(unsafe.Pointer(&b[0])) &^ uintptr(osPageMask)))
 	if 1<<p.log > maxSlotSize {
 		t.Fatal(1<<p.log, maxSlotSize)
 	}
@@ -246,7 +258,82 @@ func TestMalloc(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if alloc.nallocs != 0 || alloc.npages != 0 || alloc.nbytes != 0 {
+	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
 		t.Fatalf("%+v", alloc)
 	}
 }
+
+func benchmarkFree(b *testing.B, size int) {
+	var alloc Allocator
+	m := make(map[*[]byte]struct{}, b.N)
+	for i := 0; i < b.N; i++ {
+		p, err := alloc.Malloc(size)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		m[&p] = struct{}{}
+	}
+	b.ResetTimer()
+	for k := range m {
+		alloc.Free(*k)
+	}
+	b.StopTimer()
+	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
+		b.Fatalf("%+v", alloc)
+	}
+}
+
+func BenchmarkFree16(b *testing.B) { benchmarkFree(b, 1<<4) }
+func BenchmarkFree32(b *testing.B) { benchmarkFree(b, 1<<5) }
+func BenchmarkFree64(b *testing.B) { benchmarkFree(b, 1<<6) }
+
+func benchmarkCalloc(b *testing.B, size int) {
+	var alloc Allocator
+	m := make(map[*[]byte]struct{}, b.N)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		p, err := alloc.Calloc(size)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		m[&p] = struct{}{}
+	}
+	b.StopTimer()
+	for k := range m {
+		alloc.Free(*k)
+	}
+	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
+		b.Fatalf("%+v", alloc)
+	}
+}
+
+func BenchmarkCalloc16(b *testing.B) { benchmarkCalloc(b, 1<<4) }
+func BenchmarkCalloc32(b *testing.B) { benchmarkCalloc(b, 1<<5) }
+func BenchmarkCalloc64(b *testing.B) { benchmarkCalloc(b, 1<<6) }
+
+func benchmarkMalloc(b *testing.B, size int) {
+	var alloc Allocator
+	m := make(map[*[]byte]struct{}, b.N)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		p, err := alloc.Malloc(size)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		m[&p] = struct{}{}
+	}
+	b.StopTimer()
+	for k := range m {
+		alloc.Free(*k)
+	}
+	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
+		b.Fatalf("%+v", alloc)
+	}
+}
+
+func BenchmarkMalloc16(b *testing.B) { benchmarkMalloc(b, 1<<4) }
+func BenchmarkMalloc32(b *testing.B) { benchmarkMalloc(b, 1<<5) }
+func BenchmarkMalloc64(b *testing.B) { benchmarkMalloc(b, 1<<6) }

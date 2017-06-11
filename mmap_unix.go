@@ -13,7 +13,7 @@ import (
 	"unsafe"
 )
 
-func mmap(size int) ([]byte, error) {
+func mmap0(size int) ([]byte, error) {
 	flags := syscall.MAP_SHARED | syscall.MAP_ANON
 	prot := syscall.PROT_READ | syscall.PROT_WRITE
 	b, err := syscall.Mmap(-1, 0, size, prot, flags)
@@ -21,7 +21,7 @@ func mmap(size int) ([]byte, error) {
 		return nil, err
 	}
 
-	if uintptr(unsafe.Pointer(&b[0]))&uintptr(pageMask) != 0 {
+	if uintptr(unsafe.Pointer(&b[0]))&uintptr(osPageMask) != 0 {
 		panic("internal error")
 	}
 
