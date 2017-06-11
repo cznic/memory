@@ -87,10 +87,10 @@ func (a *Allocator) newPage(size int) (*page, error) {
 		return nil, err
 	}
 
-	a.bytes += size
+	a.bytes += len(b)
 	a.mmaps++
 	p := (*page)(unsafe.Pointer(&b[0]))
-	p.size = size
+	p.size = len(b)
 	p.log = 0
 	return p, nil
 }
@@ -105,11 +105,11 @@ func (a *Allocator) newSharedPage(log uint) (*page, error) {
 		return nil, err
 	}
 
-	a.bytes += size
+	a.bytes += len(b)
 	a.mmaps++
 	p := (*page)(unsafe.Pointer(&b[0]))
 	a.pages[log] = p
-	p.size = size
+	p.size = len(b)
 	p.log = log
 	return p, nil
 }

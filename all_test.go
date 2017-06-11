@@ -119,8 +119,8 @@ func test1(t *testing.T, max int) {
 	}
 }
 
-func Test1Small(t *testing.T)    { test1(t, max) }
-func Test1Big(t *testing.T) { test1(t, bigMax) }
+func Test1Small(t *testing.T) { test1(t, max) }
+func Test1Big(t *testing.T)   { test1(t, bigMax) }
 
 func test2(t *testing.T, max int) {
 	var alloc Allocator
@@ -170,8 +170,8 @@ func test2(t *testing.T, max int) {
 	}
 }
 
-func Test2Small(t *testing.T)    { test2(t, max) }
-func Test2Big(t *testing.T) { test2(t, bigMax) }
+func Test2Small(t *testing.T) { test2(t, max) }
+func Test2Big(t *testing.T)   { test2(t, bigMax) }
 
 func test3(t *testing.T, max int) {
 	var alloc Allocator
@@ -223,8 +223,8 @@ func test3(t *testing.T, max int) {
 	}
 }
 
-func Test3Small(t *testing.T)    { test3(t, max) }
-func Test3Big(t *testing.T) { test3(t, bigMax) }
+func Test3Small(t *testing.T) { test3(t, max) }
+func Test3Big(t *testing.T)   { test3(t, bigMax) }
 
 func TestFree(t *testing.T) {
 	var alloc Allocator
