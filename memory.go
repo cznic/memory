@@ -268,3 +268,20 @@ func (a *Allocator) Realloc(b []byte, size int) ([]byte, error) {
 	copy(r, b)
 	return r, a.Free(b)
 }
+
+// UsableSize reports the size of the memory block allocated at p, which must
+// point to the first byte of a slice returned from Calloc, Malloc or Realloc.
+// The allocated memory block size can be larger than the size originally
+// requested from Calloc, Malloc or Realloc.
+func UsableSize(p *byte) int {
+	if p == nil {
+		return 0
+	}
+
+	pg := (*page)(unsafe.Pointer(uintptr(unsafe.Pointer(p)) &^ uintptr(pageMask)))
+	if pg.log != 0 {
+		return 1 << pg.log
+	}
+
+	return pg.size - headerSize
+}

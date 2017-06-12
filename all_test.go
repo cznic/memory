@@ -95,6 +95,11 @@ func test1(t *testing.T, max int) {
 		if g, e := len(b), rng.Next()%max+1; g != e {
 			t.Fatal(i, g, e)
 		}
+
+		if a, b := len(b), UsableSize(&b[0]); a > b {
+			t.Fatal(i, a, b)
+		}
+
 		for i, g := range b {
 			if e := byte(rng.Next()); g != e {
 				t.Fatalf("%v %p: %#02x %#02x", i, &b[i], g, e)
@@ -154,6 +159,11 @@ func test2(t *testing.T, max int) {
 		if g, e := len(b), rng.Next()%max+1; g != e {
 			t.Fatal(i, g, e)
 		}
+
+		if a, b := len(b), UsableSize(&b[0]); a > b {
+			t.Fatal(i, a, b)
+		}
+
 		for i, g := range b {
 			if e := byte(rng.Next()); g != e {
 				t.Fatalf("%v %p: %#02x %#02x", i, &b[i], g, e)
@@ -211,6 +221,10 @@ func test3(t *testing.T, max int) {
 		b := *k
 		if !bytes.Equal(b, v) {
 			t.Fatal("corrupted heap")
+		}
+
+		if a, b := len(b), UsableSize(&b[0]); a > b {
+			t.Fatal(a, b)
 		}
 
 		for i := range b {
