@@ -13,6 +13,8 @@ import (
 	"unsafe"
 )
 
+var pageSize = 1 << 20
+
 func mmap0(size int) ([]byte, error) {
 	flags := syscall.MAP_SHARED | syscall.MAP_ANON
 	prot := syscall.PROT_READ | syscall.PROT_WRITE

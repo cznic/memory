@@ -14,6 +14,8 @@ import (
 	"unsafe"
 )
 
+var pageSize = os.Getpagesize()
+
 // mmap on Windows is a two-step process.
 // First, we call CreateFileMapping to get a handle.
 // Then, we call MapviewToFile to get an actual pointer into memory.

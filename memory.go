@@ -24,7 +24,6 @@ var (
 	osPageSize  = os.Getpagesize()
 	pageAvail   = pageSize - headerSize
 	pageMask    = pageSize - 1
-	pageSize    = 1 << 20
 )
 
 // if n%m != 0 { n += m-n%m }. m must be a power of 2.
@@ -32,6 +31,10 @@ func roundup(n, m int) int { return (n + m - 1) &^ (m - 1) }
 
 // pageSize aligned.
 func mmap(size int) ([]byte, error) {
+	if pageSize == osPageSize {
+		return mmap0(size)
+	}
+
 	size = roundup(size, osPageSize)
 	b, err := mmap0(size + pageSize)
 	if err != nil {
