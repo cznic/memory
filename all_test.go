@@ -202,6 +202,9 @@ func test3(t *testing.T, max int) {
 				t.Fatal(err)
 			}
 
+			for i := range b {
+				b[i] = byte(rng.Next())
+			}
 			m[&b] = append([]byte(nil), b...)
 		default: // 1/3 free
 			for k := range m {
