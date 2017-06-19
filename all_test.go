@@ -207,8 +207,16 @@ func test3(t *testing.T, max int) {
 			}
 			m[&b] = append([]byte(nil), b...)
 		default: // 1/3 free
-			for k := range m {
+			for k, v := range m {
 				b := *k
+				if !bytes.Equal(b, v) {
+					t.Fatal("corrupted heap")
+				}
+
+				if a, b := len(b), UsableSize(&b[0]); a > b {
+					t.Fatal(a, b)
+				}
+
 				for i := range b {
 					b[i] = 0
 				}

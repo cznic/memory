@@ -234,6 +234,9 @@ func (a *Allocator) Malloc(size int) (r []byte, _ error) {
 	n := a.lists[log]
 	p := (*page)(unsafe.Pointer(uintptr(unsafe.Pointer(n)) &^ uintptr(pageMask)))
 	a.lists[log] = n.next
+	if n.next != nil {
+		n.next.prev = nil
+	}
 	p.used++
 	var b []byte
 	sh := (*reflect.SliceHeader)(unsafe.Pointer(&b))
