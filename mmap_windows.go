@@ -36,6 +36,10 @@ func mmap(size int) ([]byte, error) {
 		return nil, err
 	}
 
+	if addr&uintptr(pageMask) != 0 {
+		panic("internal error")
+	}
+
 	var b []byte
 	sh := (*reflect.SliceHeader)(unsafe.Pointer(&b))
 	sh.Data = addr
