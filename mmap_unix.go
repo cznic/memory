@@ -38,3 +38,32 @@ func unmap(addr unsafe.Pointer, size int) error {
 
 	return nil
 }
+
+// pageSize aligned.
+func mmap(size int) ([]byte, error) {
+	size = roundup(size, osPageSize)
+	b, err := mmap0(size + pageSize)
+	if err != nil {
+		return nil, err
+	}
+
+	mod := int(uintptr(unsafe.Pointer(&b[0]))) & pageMask
+	if mod != 0 {
+		n := pageSize - mod
+		if err := unmap(unsafe.Pointer(&b[0]), n); err != nil {
+			return nil, err
+		}
+
+		b = b[n:]
+	}
+
+	if uintptr(unsafe.Pointer(&b[0]))&uintptr(pageMask) != 0 {
+		panic("internal error")
+	}
+
+	if err := unmap(unsafe.Pointer(&b[size]), len(b)-size); err != nil {
+		return nil, err
+	}
+
+	return b[:size:size], nil
+}

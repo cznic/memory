@@ -1,56 +1,41 @@
-// Copyright 2011 Evan Shaw. All rights reserved.
+// Copyright 2017 The Memory Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE-MMAP-GO file.
-
-// Modifications (c) 2017 The Memory Authors.
+// license that can be found in the LICENSE file.
 
 package memory
 
 import (
-	"errors"
-	"os"
 	"reflect"
 	"syscall"
 	"unsafe"
 )
 
-var pageSize = os.Getpagesize()
+const (
+	_MEM_COMMIT   = 0x1000
+	_MEM_RESERVE  = 0x2000
+	_MEM_DECOMMIT = 0x4000
+	_MEM_RELEASE  = 0x8000
 
-// mmap on Windows is a two-step process.
-// First, we call CreateFileMapping to get a handle.
-// Then, we call MapviewToFile to get an actual pointer into memory.
+	_PAGE_READWRITE = 0x0004
+	_PAGE_NOACCESS  = 0x0001
+)
 
-// We keep this map so that we can get back the original handle from the memory address.
-var handleMap = map[uintptr]syscall.Handle{}
+var (
+	pageSize = 1 << 16
 
-func mmap0(size int) ([]byte, error) {
-	flProtect := uint32(syscall.PAGE_READWRITE)
-	dwDesiredAccess := uint32(syscall.FILE_MAP_WRITE)
+	modkernel32      = syscall.NewLazyDLL("kernel32.dll")
+	procVirtualAlloc = modkernel32.NewProc("VirtualAlloc")
+	procVirtualFree  = modkernel32.NewProc("VirtualFree")
+)
 
-	// The maximum size is the area of the file, starting from 0,
-	// that we wish to allow to be mappable. It is the sum of
-	// the length the user requested, plus the offset where that length
-	// is starting from. This does not map the data into memory.
-	maxSizeHigh := uint32(int64(size) >> 32)
-	maxSizeLow := uint32(int64(size) & 0xFFFFFFFF)
-	// TODO: Do we need to set some security attributes? It might help portability.
-	h, errno := syscall.CreateFileMapping(syscall.Handle(^uintptr(0)), nil, flProtect, maxSizeHigh, maxSizeLow, nil)
-	if h == 0 {
-		return nil, os.NewSyscallError("CreateFileMapping", errno)
-	}
-
-	// Actually map a view of the data into memory. The view's size
-	// is the length the user requested.
-	addr, errno := syscall.MapViewOfFile(h, dwDesiredAccess, 0, 0, uintptr(size))
+// pageSize aligned.
+func mmap(size int) ([]byte, error) {
+	size = roundup(size, pageSize)
+	addr, _, err := procVirtualAlloc.Call(0, uintptr(size), _MEM_COMMIT|_MEM_RESERVE, _PAGE_READWRITE)
 	if addr == 0 {
-		return nil, os.NewSyscallError("MapViewOfFile", errno)
+		return nil, err
 	}
 
-	if addr&uintptr(osPageMask) != 0 {
-		panic("internal error")
-	}
-
-	handleMap[addr] = h
 	var b []byte
 	sh := (*reflect.SliceHeader)(unsafe.Pointer(&b))
 	sh.Data = addr
@@ -60,23 +45,10 @@ func mmap0(size int) ([]byte, error) {
 }
 
 func unmap(addr unsafe.Pointer, size int) error {
-	// Lock the UnmapViewOfFile along with the handleMap deletion.
-	// As soon as we unmap the view, the OS is free to give the
-	// same addr to another new map. We don't want another goroutine
-	// to insert and remove the same addr into handleMap while
-	// we're trying to remove our old addr/handle pair.
-	err := syscall.UnmapViewOfFile(uintptr(addr))
-	if err != nil {
+	r, _, err := procVirtualFree.Call(uintptr(addr), uintptr(size), _MEM_DECOMMIT)
+	if r == 0 {
 		return err
 	}
 
-	handle, ok := handleMap[uintptr(addr)]
-	if !ok {
-		// should be impossible; we would've errored above
-		return errors.New("unknown base address")
-	}
-	delete(handleMap, uintptr(addr))
-
-	e := syscall.CloseHandle(syscall.Handle(handle))
-	return os.NewSyscallError("CloseHandle", e)
+	return nil
 }

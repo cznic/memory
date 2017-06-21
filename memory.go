@@ -29,39 +29,6 @@ var (
 // if n%m != 0 { n += m-n%m }. m must be a power of 2.
 func roundup(n, m int) int { return (n + m - 1) &^ (m - 1) }
 
-// pageSize aligned.
-func mmap(size int) ([]byte, error) {
-	if pageSize == osPageSize {
-		return mmap0(size)
-	}
-
-	size = roundup(size, osPageSize)
-	b, err := mmap0(size + pageSize)
-	if err != nil {
-		return nil, err
-	}
-
-	mod := int(uintptr(unsafe.Pointer(&b[0]))) & pageMask
-	if mod != 0 {
-		n := pageSize - mod
-		if err := unmap(unsafe.Pointer(&b[0]), n); err != nil {
-			return nil, err
-		}
-
-		b = b[n:]
-	}
-
-	if uintptr(unsafe.Pointer(&b[0]))&uintptr(pageMask) != 0 {
-		panic("internal error")
-	}
-
-	if err := unmap(unsafe.Pointer(&b[size]), len(b)-size); err != nil {
-		return nil, err
-	}
-
-	return b[:size:size], nil
-}
-
 type node struct {
 	prev, next *node
 }
