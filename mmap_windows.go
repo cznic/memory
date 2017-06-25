@@ -49,7 +49,7 @@ func mmap(size int) ([]byte, error) {
 }
 
 func unmap(addr unsafe.Pointer, size int) error {
-	r, _, err := procVirtualFree.Call(uintptr(addr), uintptr(size), _MEM_DECOMMIT)
+	r, _, err := procVirtualFree.Call(uintptr(addr), 0, _MEM_RELEASE)
 	if r == 0 {
 		return err
 	}
