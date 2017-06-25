@@ -67,16 +67,19 @@ func test1(t *testing.T, max int) {
 	var alloc Allocator
 	rem := quota
 	var a [][]byte
-	rng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	rng.Seed(42)
-	pos := rng.Pos()
+	vrng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Allocate
 	for rem > 0 {
-		size := rng.Next()%max + 1
+		size := srng.Next()%max + 1
 		rem -= size
 		b, err := alloc.Malloc(size)
 		if err != nil {
@@ -85,14 +88,15 @@ func test1(t *testing.T, max int) {
 
 		a = append(a, b)
 		for i := range b {
-			b[i] = byte(rng.Next())
+			b[i] = byte(vrng.Next())
 		}
 	}
 	t.Logf("allocs %v, mmaps %v, bytes %v, overhead %v (%.2f%%).", alloc.allocs, alloc.mmaps, alloc.bytes, alloc.bytes-quota, 100*float64(alloc.bytes-quota)/quota)
-	rng.Seek(pos)
+	srng.Seek(0)
+	vrng.Seek(0)
 	// Verify
 	for i, b := range a {
-		if g, e := len(b), rng.Next()%max+1; g != e {
+		if g, e := len(b), srng.Next()%max+1; g != e {
 			t.Fatal(i, g, e)
 		}
 
@@ -101,7 +105,7 @@ func test1(t *testing.T, max int) {
 		}
 
 		for i, g := range b {
-			if e := byte(rng.Next()); g != e {
+			if e := byte(vrng.Next()); g != e {
 				t.Fatalf("%v %p: %#02x %#02x", i, &b[i], g, e)
 			}
 
@@ -110,7 +114,7 @@ func test1(t *testing.T, max int) {
 	}
 	// Shuffle
 	for i := range a {
-		j := rng.Next() % len(a)
+		j := srng.Next() % len(a)
 		a[i], a[j] = a[j], a[i]
 	}
 	// Free
@@ -131,16 +135,19 @@ func test2(t *testing.T, max int) {
 	var alloc Allocator
 	rem := quota
 	var a [][]byte
-	rng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	rng.Seed(42)
-	pos := rng.Pos()
+	vrng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Allocate
 	for rem > 0 {
-		size := rng.Next()%max + 1
+		size := srng.Next()%max + 1
 		rem -= size
 		b, err := alloc.Malloc(size)
 		if err != nil {
@@ -149,14 +156,15 @@ func test2(t *testing.T, max int) {
 
 		a = append(a, b)
 		for i := range b {
-			b[i] = byte(rng.Next())
+			b[i] = byte(vrng.Next())
 		}
 	}
 	t.Logf("allocs %v, mmaps %v, bytes %v, overhead %v (%.2f%%).", alloc.allocs, alloc.mmaps, alloc.bytes, alloc.bytes-quota, 100*float64(alloc.bytes-quota)/quota)
-	rng.Seek(pos)
+	srng.Seek(0)
+	vrng.Seek(0)
 	// Verify & free
 	for i, b := range a {
-		if g, e := len(b), rng.Next()%max+1; g != e {
+		if g, e := len(b), srng.Next()%max+1; g != e {
 			t.Fatal(i, g, e)
 		}
 
@@ -165,7 +173,7 @@ func test2(t *testing.T, max int) {
 		}
 
 		for i, g := range b {
-			if e := byte(rng.Next()); g != e {
+			if e := byte(vrng.Next()); g != e {
 				t.Fatalf("%v %p: %#02x %#02x", i, &b[i], g, e)
 			}
 
@@ -187,15 +195,20 @@ func test3(t *testing.T, max int) {
 	var alloc Allocator
 	rem := quota
 	m := map[*[]byte][]byte{}
-	rng, err := mathutil.NewFC32(1, max, true)
+	srng, err := mathutil.NewFC32(1, max, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vrng, err := mathutil.NewFC32(1, max, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	for rem > 0 {
-		switch rng.Next() % 3 {
+		switch srng.Next() % 3 {
 		case 0, 1: // 2/3 allocate
-			size := rng.Next()
+			size := srng.Next()
 			rem -= size
 			b, err := alloc.Malloc(size)
 			if err != nil {
@@ -203,7 +216,7 @@ func test3(t *testing.T, max int) {
 			}
 
 			for i := range b {
-				b[i] = byte(rng.Next())
+				b[i] = byte(vrng.Next())
 			}
 			m[&b] = append([]byte(nil), b...)
 		default: // 1/3 free
