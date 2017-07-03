@@ -6,6 +6,7 @@
 package memory
 
 import (
+	"fmt"
 	"os"
 	"reflect"
 	"unsafe"
@@ -85,7 +86,16 @@ func (a *Allocator) newSharedPage(log uint) (*page, error) {
 }
 
 // Calloc is like Malloc except the allocated memory is zeroed.
-func (a *Allocator) Calloc(size int) ([]byte, error) {
+func (a *Allocator) Calloc(size int) (r []byte, err error) {
+	if trace {
+		defer func() {
+			var p *byte
+			if len(r) != 0 {
+				p = &r[0]
+			}
+			fmt.Fprintf(os.Stderr, "Calloc(%#x) %p, %v\n", size, p, err)
+		}()
+	}
 	b, err := a.Malloc(size)
 	if err != nil {
 		return nil, err
@@ -99,7 +109,16 @@ func (a *Allocator) Calloc(size int) ([]byte, error) {
 
 // Free deallocates memory (as in C.free). The argument of Free must have been
 // acquired from Calloc or Malloc or Realloc.
-func (a *Allocator) Free(b []byte) error {
+func (a *Allocator) Free(b []byte) (err error) {
+	if trace {
+		var p *byte
+		if len(b) != 0 {
+			p = &b[0]
+		}
+		defer func() {
+			fmt.Fprintf(os.Stderr, "Free(%#x) %v\n", p, err)
+		}()
+	}
 	b = b[:cap(b)]
 	a.allocs--
 	p := (*page)(unsafe.Pointer(uintptr(unsafe.Pointer(&b[0])) &^ uintptr(pageMask)))
@@ -153,7 +172,16 @@ func (a *Allocator) Free(b []byte) error {
 // It's ok to reslice the returned slice but the result of appending to it
 // cannot be passed to Free or Realloc as it may refer to a different backing
 // array afterwards.
-func (a *Allocator) Malloc(size int) (r []byte, _ error) {
+func (a *Allocator) Malloc(size int) (r []byte, err error) {
+	if trace {
+		defer func() {
+			var p *byte
+			if len(r) != 0 {
+				p = &r[0]
+			}
+			fmt.Fprintf(os.Stderr, "Malloc(%#x) %p, %v\n", size, p, err)
+		}()
+	}
 	if size < 0 {
 		panic("invalid malloc size")
 	}
@@ -223,7 +251,20 @@ func (a *Allocator) Malloc(size int) (r []byte, _ error) {
 // to Free(b).  Unless b's backing array is of zero size, it must have been
 // returned by an earlier call to Malloc, Calloc or Realloc.  If the area
 // pointed to was moved, a Free(b) is done.
-func (a *Allocator) Realloc(b []byte, size int) ([]byte, error) {
+func (a *Allocator) Realloc(b []byte, size int) (r []byte, err error) {
+	if trace {
+		var p0 *byte
+		if len(b) != 0 {
+			p0 = &b[0]
+		}
+		defer func() {
+			var p *byte
+			if len(r) != 0 {
+				p = &r[0]
+			}
+			fmt.Fprintf(os.Stderr, "Realloc(%p, %#x) %p, %v\n", p0, size, p, err)
+		}()
+	}
 	switch {
 	case cap(b) == 0:
 		return a.Malloc(size)
@@ -233,8 +274,7 @@ func (a *Allocator) Realloc(b []byte, size int) ([]byte, error) {
 		return b[:size], nil
 	}
 
-	r, err := a.Malloc(size)
-	if err != nil {
+	if r, err = a.Malloc(size); err != nil {
 		return nil, err
 	}
 
@@ -246,7 +286,12 @@ func (a *Allocator) Realloc(b []byte, size int) ([]byte, error) {
 // point to the first byte of a slice returned from Calloc, Malloc or Realloc.
 // The allocated memory block size can be larger than the size originally
 // requested from Calloc, Malloc or Realloc.
-func UsableSize(p *byte) int {
+func UsableSize(p *byte) (r int) {
+	if trace {
+		defer func() {
+			fmt.Fprintf(os.Stderr, "UsableSize(%p) %#x\n", p, r)
+		}()
+	}
 	if p == nil {
 		return 0
 	}
