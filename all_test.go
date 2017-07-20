@@ -303,18 +303,18 @@ func TestMalloc(t *testing.T) {
 
 func benchmarkFree(b *testing.B, size int) {
 	var alloc Allocator
-	m := make(map[*[]byte]struct{}, b.N)
-	for i := 0; i < b.N; i++ {
+	a := make([][]byte, b.N)
+	for i := range a {
 		p, err := alloc.Malloc(size)
 		if err != nil {
 			b.Fatal(err)
 		}
 
-		m[&p] = struct{}{}
+		a[i] = p
 	}
 	b.ResetTimer()
-	for k := range m {
-		alloc.Free(*k)
+	for _, b := range a {
+		alloc.Free(b)
 	}
 	b.StopTimer()
 	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
@@ -328,19 +328,19 @@ func BenchmarkFree64(b *testing.B) { benchmarkFree(b, 1<<6) }
 
 func benchmarkCalloc(b *testing.B, size int) {
 	var alloc Allocator
-	m := make(map[*[]byte]struct{}, b.N)
+	a := make([][]byte, b.N)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range a {
 		p, err := alloc.Calloc(size)
 		if err != nil {
 			b.Fatal(err)
 		}
 
-		m[&p] = struct{}{}
+		a[i] = p
 	}
 	b.StopTimer()
-	for k := range m {
-		alloc.Free(*k)
+	for _, b := range a {
+		alloc.Free(b)
 	}
 	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
 		b.Fatalf("%+v", alloc)
@@ -353,19 +353,19 @@ func BenchmarkCalloc64(b *testing.B) { benchmarkCalloc(b, 1<<6) }
 
 func benchmarkMalloc(b *testing.B, size int) {
 	var alloc Allocator
-	m := make(map[*[]byte]struct{}, b.N)
+	a := make([][]byte, b.N)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range a {
 		p, err := alloc.Malloc(size)
 		if err != nil {
 			b.Fatal(err)
 		}
 
-		m[&p] = struct{}{}
+		a[i] = p
 	}
 	b.StopTimer()
-	for k := range m {
-		alloc.Free(*k)
+	for _, b := range a {
+		alloc.Free(b)
 	}
 	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
 		b.Fatalf("%+v", alloc)
