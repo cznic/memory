@@ -351,6 +351,20 @@ func BenchmarkCalloc16(b *testing.B) { benchmarkCalloc(b, 1<<4) }
 func BenchmarkCalloc32(b *testing.B) { benchmarkCalloc(b, 1<<5) }
 func BenchmarkCalloc64(b *testing.B) { benchmarkCalloc(b, 1<<6) }
 
+func benchmarkGoCalloc(b *testing.B, size int) {
+	a := make([][]byte, b.N)
+	b.ResetTimer()
+	for i := range a {
+		a[i] = make([]byte, size)
+	}
+	b.StopTimer()
+	use(a)
+}
+
+func BenchmarkGoCalloc16(b *testing.B) { benchmarkGoCalloc(b, 1<<4) }
+func BenchmarkGoCalloc32(b *testing.B) { benchmarkGoCalloc(b, 1<<5) }
+func BenchmarkGoCalloc64(b *testing.B) { benchmarkGoCalloc(b, 1<<6) }
+
 func benchmarkMalloc(b *testing.B, size int) {
 	var alloc Allocator
 	a := make([][]byte, b.N)
