@@ -3,6 +3,41 @@
 // license that can be found in the LICENSE file.
 
 // Package memory implements a memory allocator.
+//
+// Changelog
+//
+// 2017-10-03 Added alternative, unsafe.Pointer-based API.
+//
+// Benchmarks
+//
+// Intel® Core™ i5-4670 CPU @ 3.40GHz × 4
+//
+//  goos: linux
+//  goarch: amd64
+//  pkg: github.com/cznic/memory
+//  BenchmarkFree16-4           	100000000	        15.3 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkFree32-4           	100000000	        21.3 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkFree64-4           	50000000	        35.9 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkCalloc16-4         	50000000	        26.6 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkCalloc32-4         	50000000	        30.1 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkCalloc64-4         	30000000	        38.1 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkGoCalloc16-4       	50000000	        29.3 ns/op	      16 B/op	       1 allocs/op
+//  BenchmarkGoCalloc32-4       	50000000	        30.4 ns/op	      32 B/op	       1 allocs/op
+//  BenchmarkGoCalloc64-4       	30000000	        37.9 ns/op	      64 B/op	       1 allocs/op
+//  BenchmarkMalloc16-4         	100000000	        15.4 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkMalloc32-4         	100000000	        15.6 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkMalloc64-4         	100000000	        15.9 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkUnsafeFree16-4     	100000000	        14.4 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkUnsafeFree32-4     	100000000	        20.4 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkUnsafeFree64-4     	50000000	        34.1 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkUnsafeCalloc16-4   	50000000	        23.2 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkUnsafeCalloc32-4   	50000000	        28.0 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkUnsafeCalloc64-4   	50000000	        34.1 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkUnsafeMalloc16-4   	100000000	        13.8 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkUnsafeMalloc32-4   	100000000	        14.2 ns/op	       0 B/op	       0 allocs/op
+//  BenchmarkUnsafeMalloc64-4   	100000000	        14.0 ns/op	       0 B/op	       0 allocs/op
+//  PASS
+//  ok  	github.com/cznic/memory	229.054s
 package memory
 
 import (
@@ -16,6 +51,7 @@ import (
 
 const (
 	mallocAllign = 16 // Must be >= 16
+	intBits      = 1 << (^uint(0)>>32&1 + ^uint(0)>>16&1 + ^uint(0)>>8&1 + 3)
 )
 
 var (
@@ -282,11 +318,140 @@ func (a *Allocator) Realloc(b []byte, size int) (r []byte, err error) {
 	return r, a.Free(b)
 }
 
-// UsableSize reports the size of the memory block allocated at p, which must
-// point to the first byte of a slice returned from Calloc, Malloc or Realloc.
-// The allocated memory block size can be larger than the size originally
-// requested from Calloc, Malloc or Realloc.
-func UsableSize(p *byte) (r int) {
+// UnsafeCalloc is like Calloc except it returns an unsafe.Pointer.
+func (a *Allocator) UnsafeCalloc(size int) (r unsafe.Pointer, err error) {
+	if trace {
+		defer func() {
+			fmt.Fprintf(os.Stderr, "Calloc(%#x) %p, %v\n", size, r, err)
+		}()
+	}
+	if r, err = a.UnsafeMalloc(size); r == nil || err != nil {
+		return nil, err
+	}
+
+	switch {
+	case intBits > 32:
+		b := ((*[1 << 49]byte)(r))[:size]
+		for i := range b {
+			b[i] = 0
+		}
+	default:
+		b := ((*[1 << 31]byte)(r))[:size]
+		for i := range b {
+			b[i] = 0
+		}
+	}
+	return r, nil
+}
+
+// UnsafeFree is like Free except its argument is an unsafe.Pointer, which must
+// have been acquired from UnsafeCalloc or UnsafeMalloc or UnsafeRealloc.
+func (a *Allocator) UnsafeFree(p unsafe.Pointer) (err error) {
+	if trace {
+		defer func() {
+			fmt.Fprintf(os.Stderr, "Free(%#x) %v\n", p, err)
+		}()
+	}
+	a.allocs--
+	pg := (*page)(unsafe.Pointer(uintptr(p) &^ uintptr(pageMask)))
+	log := pg.log
+	if log == 0 {
+		a.mmaps--
+		a.bytes -= pg.size
+		return unmap(unsafe.Pointer(pg), pg.size)
+	}
+
+	n := (*node)(p)
+	n.prev = nil
+	n.next = a.lists[log]
+	if n.next != nil {
+		n.next.prev = n
+	}
+	a.lists[log] = n
+	pg.used--
+	if pg.used != 0 {
+		return nil
+	}
+
+	for i := 0; i < pg.brk; i++ {
+		n := (*node)(unsafe.Pointer(uintptr(unsafe.Pointer(pg)) + uintptr(headerSize+i<<log)))
+		switch {
+		case n.prev == nil:
+			a.lists[log] = n.next
+			if n.next != nil {
+				n.next.prev = nil
+			}
+		case n.next == nil:
+			n.prev.next = nil
+		default:
+			n.prev.next = n.next
+			n.next.prev = n.prev
+		}
+	}
+
+	if a.pages[log] == pg {
+		a.pages[log] = nil
+	}
+	a.mmaps--
+	a.bytes -= pg.size
+	return unmap(unsafe.Pointer(pg), pg.size)
+}
+
+// UnsafeMalloc is like Malloc except it returns an unsafe.Pointer.
+func (a *Allocator) UnsafeMalloc(size int) (r unsafe.Pointer, err error) {
+	if trace {
+		defer func() {
+			fmt.Fprintf(os.Stderr, "Malloc(%#x) %p, %v\n", size, r, err)
+		}()
+	}
+	if size < 0 {
+		panic("invalid malloc size")
+	}
+
+	if size == 0 {
+		return nil, nil
+	}
+
+	a.allocs++
+	log := uint(mathutil.BitLen(roundup(size, mallocAllign) - 1))
+	if 1<<log > maxSlotSize {
+		p, err := a.newPage(size)
+		if err != nil {
+			return nil, err
+		}
+
+		return unsafe.Pointer(uintptr(unsafe.Pointer(p)) + uintptr(headerSize)), nil
+	}
+
+	if a.lists[log] == nil && a.pages[log] == nil {
+		if _, err := a.newSharedPage(log); err != nil {
+			return nil, err
+		}
+	}
+
+	if p := a.pages[log]; p != nil {
+		p.used++
+		p.brk++
+		if p.brk == a.cap[log] {
+			a.pages[log] = nil
+		}
+		return unsafe.Pointer(uintptr(unsafe.Pointer(p)) + uintptr(headerSize+(p.brk-1)<<log)), nil
+	}
+
+	n := a.lists[log]
+	p := (*page)(unsafe.Pointer(uintptr(unsafe.Pointer(n)) &^ uintptr(pageMask)))
+	a.lists[log] = n.next
+	if n.next != nil {
+		n.next.prev = nil
+	}
+	p.used++
+	return unsafe.Pointer(n), nil
+}
+
+// UnsafeUsableSize is like UsableSize except its argument is an
+// unsafe.Pointer, which must have been returned from UnsafeCalloc,
+// UnsafeMalloc or UnsafeRealloc.
+func UnsafeUsableSize(p unsafe.Pointer) (r int) {
 	if trace {
 		defer func() {
 			fmt.Fprintf(os.Stderr, "UsableSize(%p) %#x\n", p, r)
@@ -296,10 +461,53 @@ func UsableSize(p *byte) (r int) {
 		return 0
 	}
 
-	pg := (*page)(unsafe.Pointer(uintptr(unsafe.Pointer(p)) &^ uintptr(pageMask)))
+	pg := (*page)(unsafe.Pointer(uintptr(p) &^ uintptr(pageMask)))
 	if pg.log != 0 {
 		return 1 << pg.log
 	}
 
 	return pg.size - headerSize
 }
+
+// UnsafeRealloc is like Realloc except its first argument is an
+// unsafe.Pointer, which must have been returned from UnsafeCalloc,
+// UnsafeMalloc or UnsafeRealloc.
+func (a *Allocator) UnsafeRealloc(p unsafe.Pointer, size int) (r unsafe.Pointer, err error) {
+	if trace {
+		defer func() {
+			fmt.Fprintf(os.Stderr, "UnsafeRealloc(%p, %#x) %p, %v\n", p, size, r, err)
+		}()
+	}
+	switch {
+	case p == nil:
+		return a.UnsafeMalloc(size)
+	case size == 0 && p != nil:
+		return nil, a.UnsafeFree(p)
+	}
+
+	us := UnsafeUsableSize(p)
+	if us > size {
+		return p, nil
+	}
+
+	if r, err = a.UnsafeMalloc(size); err != nil {
+		return nil, err
+	}
+
+	if us < size {
+		size = us
+	}
+	switch {
+	case intBits > 32:
+		copy((*[1 << 49]byte)(r)[:size], (*[1 << 49]byte)(p)[:size])
+	default:
+		copy((*[1 << 31]byte)(r)[:size], (*[1 << 31]byte)(p)[:size])
+	}
+	return r, a.UnsafeFree(p)
+}
+
+// UsableSize reports the size of the memory block allocated at p, which must
+// point to the first byte of a slice returned from Calloc, Malloc or Realloc.
+// The allocated memory block size can be larger than the size originally
+// requested from Calloc, Malloc or Realloc.
+func UsableSize(p *byte) (r int) { return UnsafeUsableSize(unsafe.Pointer(p)) }

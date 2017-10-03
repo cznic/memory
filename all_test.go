@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"path"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -301,6 +302,259 @@ func TestMalloc(t *testing.T) {
 	}
 }
 
+func test1Unsafe(t *testing.T, max int) {
+	var alloc Allocator
+	rem := quota
+	var a [][]byte
+	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vrng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Allocate
+	for rem > 0 {
+		size := srng.Next()%max + 1
+		rem -= size
+		p, err := alloc.UnsafeMalloc(size)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var b []byte
+		sh := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+		sh.Data = uintptr(p)
+		sh.Len = size
+		sh.Cap = size
+		a = append(a, b)
+		for i := range b {
+			b[i] = byte(vrng.Next())
+		}
+	}
+	t.Logf("allocs %v, mmaps %v, bytes %v, overhead %v (%.2f%%).", alloc.allocs, alloc.mmaps, alloc.bytes, alloc.bytes-quota, 100*float64(alloc.bytes-quota)/quota)
+	srng.Seek(0)
+	vrng.Seek(0)
+	// Verify
+	for i, b := range a {
+		if g, e := len(b), srng.Next()%max+1; g != e {
+			t.Fatal(i, g, e)
+		}
+
+		if a, b := len(b), UsableSize(&b[0]); a > b {
+			t.Fatal(i, a, b)
+		}
+
+		for i, g := range b {
+			if e := byte(vrng.Next()); g != e {
+				t.Fatalf("%v %p: %#02x %#02x", i, &b[i], g, e)
+			}
+
+			b[i] = 0
+		}
+	}
+	// Shuffle
+	for i := range a {
+		j := srng.Next() % len(a)
+		a[i], a[j] = a[j], a[i]
+	}
+	// Free
+	for _, b := range a {
+		if err := alloc.UnsafeFree(unsafe.Pointer(&b[0])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
+		t.Fatalf("%+v", alloc)
+	}
+}
+
+func Test1UnsafeSmall(t *testing.T) { test1Unsafe(t, max) }
+func Test1UnsafeBig(t *testing.T)   { test1Unsafe(t, bigMax) }
+
+func test2Unsafe(t *testing.T, max int) {
+	var alloc Allocator
+	rem := quota
+	var a [][]byte
+	srng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vrng, err := mathutil.NewFC32(0, math.MaxInt32, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Allocate
+	for rem > 0 {
+		size := srng.Next()%max + 1
+		rem -= size
+		p, err := alloc.UnsafeMalloc(size)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var b []byte
+		sh := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+		sh.Data = uintptr(p)
+		sh.Len = size
+		sh.Cap = size
+		a = append(a, b)
+		for i := range b {
+			b[i] = byte(vrng.Next())
+		}
+	}
+	t.Logf("allocs %v, mmaps %v, bytes %v, overhead %v (%.2f%%).", alloc.allocs, alloc.mmaps, alloc.bytes, alloc.bytes-quota, 100*float64(alloc.bytes-quota)/quota)
+	srng.Seek(0)
+	vrng.Seek(0)
+	// Verify & free
+	for i, b := range a {
+		if g, e := len(b), srng.Next()%max+1; g != e {
+			t.Fatal(i, g, e)
+		}
+
+		if a, b := len(b), UsableSize(&b[0]); a > b {
+			t.Fatal(i, a, b)
+		}
+
+		for i, g := range b {
+			if e := byte(vrng.Next()); g != e {
+				t.Fatalf("%v %p: %#02x %#02x", i, &b[i], g, e)
+			}
+
+			b[i] = 0
+		}
+		if err := alloc.UnsafeFree(unsafe.Pointer(&b[0])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
+		t.Fatalf("%+v", alloc)
+	}
+}
+
+func Test2UnsafeSmall(t *testing.T) { test2Unsafe(t, max) }
+func Test2UnsafeBig(t *testing.T)   { test2Unsafe(t, bigMax) }
+
+func test3Unsafe(t *testing.T, max int) {
+	var alloc Allocator
+	rem := quota
+	m := map[*[]byte][]byte{}
+	srng, err := mathutil.NewFC32(1, max, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vrng, err := mathutil.NewFC32(1, max, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for rem > 0 {
+		switch srng.Next() % 3 {
+		case 0, 1: // 2/3 allocate
+			size := srng.Next()
+			rem -= size
+			p, err := alloc.UnsafeMalloc(size)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var b []byte
+			sh := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+			sh.Data = uintptr(p)
+			sh.Len = size
+			sh.Cap = size
+			for i := range b {
+				b[i] = byte(vrng.Next())
+			}
+			m[&b] = append([]byte(nil), b...)
+		default: // 1/3 free
+			for k, v := range m {
+				b := *k
+				if !bytes.Equal(b, v) {
+					t.Fatal("corrupted heap")
+				}
+
+				if a, b := len(b), UsableSize(&b[0]); a > b {
+					t.Fatal(a, b)
+				}
+
+				for i := range b {
+					b[i] = 0
+				}
+				rem += len(b)
+				alloc.UnsafeFree(unsafe.Pointer(&b[0]))
+				delete(m, k)
+				break
+			}
+		}
+	}
+	t.Logf("allocs %v, mmaps %v, bytes %v, overhead %v (%.2f%%).", alloc.allocs, alloc.mmaps, alloc.bytes, alloc.bytes-quota, 100*float64(alloc.bytes-quota)/quota)
+	for k, v := range m {
+		b := *k
+		if !bytes.Equal(b, v) {
+			t.Fatal("corrupted heap")
+		}
+
+		if a, b := len(b), UnsafeUsableSize(unsafe.Pointer(&b[0])); a > b {
+			t.Fatal(a, b)
+		}
+
+		for i := range b {
+			b[i] = 0
+		}
+		alloc.UnsafeFree(unsafe.Pointer(&b[0]))
+	}
+	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
+		t.Fatalf("%+v", alloc)
+	}
+}
+
+func Test3UnsafeSmall(t *testing.T) { test3Unsafe(t, max) }
+func Test3UnsafeBig(t *testing.T)   { test3Unsafe(t, bigMax) }
+
+func TestUnsafeFree(t *testing.T) {
+	var alloc Allocator
+	p, err := alloc.UnsafeMalloc(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := alloc.UnsafeFree(p); err != nil {
+		t.Fatal(err)
+	}
+
+	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
+		t.Fatalf("%+v", alloc)
+	}
+}
+
+func TestUnsafeMalloc(t *testing.T) {
+	var alloc Allocator
+	p, err := alloc.UnsafeMalloc(maxSlotSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pg := (*page)(unsafe.Pointer(uintptr(p) &^ uintptr(osPageMask)))
+	if 1<<pg.log > maxSlotSize {
+		t.Fatal(1<<pg.log, maxSlotSize)
+	}
+
+	if err := alloc.UnsafeFree(p); err != nil {
+		t.Fatal(err)
+	}
+
+	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
+		t.Fatalf("%+v", alloc)
+	}
+}
+
 func benchmarkFree(b *testing.B, size int) {
 	var alloc Allocator
 	a := make([][]byte, b.N)
@@ -389,3 +643,78 @@ func benchmarkMalloc(b *testing.B, size int) {
 func BenchmarkMalloc16(b *testing.B) { benchmarkMalloc(b, 1<<4) }
 func BenchmarkMalloc32(b *testing.B) { benchmarkMalloc(b, 1<<5) }
 func BenchmarkMalloc64(b *testing.B) { benchmarkMalloc(b, 1<<6) }
+
+func benchmarkUnsafeFree(b *testing.B, size int) {
+	var alloc Allocator
+	a := make([]unsafe.Pointer, b.N)
+	for i := range a {
+		p, err := alloc.UnsafeMalloc(size)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		a[i] = p
+	}
+	b.ResetTimer()
+	for _, p := range a {
+		alloc.UnsafeFree(p)
+	}
+	b.StopTimer()
+	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
+		b.Fatalf("%+v", alloc)
+	}
+}
+
+func BenchmarkUnsafeFree16(b *testing.B) { benchmarkUnsafeFree(b, 1<<4) }
+func BenchmarkUnsafeFree32(b *testing.B) { benchmarkUnsafeFree(b, 1<<5) }
+func BenchmarkUnsafeFree64(b *testing.B) { benchmarkUnsafeFree(b, 1<<6) }
+
+func benchmarkUnsafeCalloc(b *testing.B, size int) {
+	var alloc Allocator
+	a := make([]unsafe.Pointer, b.N)
+	b.ResetTimer()
+	for i := range a {
+		p, err := alloc.UnsafeCalloc(size)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		a[i] = p
+	}
+	b.StopTimer()
+	for _, p := range a {
+		alloc.UnsafeFree(p)
+	}
+	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
+		b.Fatalf("%+v", alloc)
+	}
+}
+
+func BenchmarkUnsafeCalloc16(b *testing.B) { benchmarkUnsafeCalloc(b, 1<<4) }
+func BenchmarkUnsafeCalloc32(b *testing.B) { benchmarkUnsafeCalloc(b, 1<<5) }
+func BenchmarkUnsafeCalloc64(b *testing.B) { benchmarkUnsafeCalloc(b, 1<<6) }
+
+func benchmarkUnsafeMalloc(b *testing.B, size int) {
+	var alloc Allocator
+	a := make([]unsafe.Pointer, b.N)
+	b.ResetTimer()
+	for i := range a {
+		p, err := alloc.UnsafeMalloc(size)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		a[i] = p
+	}
+	b.StopTimer()
+	for _, p := range a {
+		alloc.UnsafeFree(p)
+	}
+	if alloc.allocs != 0 || alloc.mmaps != 0 || alloc.bytes != 0 {
+		b.Fatalf("%+v", alloc)
+	}
+}
+
+func BenchmarkUnsafeMalloc16(b *testing.B) { benchmarkUnsafeMalloc(b, 1<<4) }
+func BenchmarkUnsafeMalloc32(b *testing.B) { benchmarkUnsafeMalloc(b, 1<<5) }
+func BenchmarkUnsafeMalloc64(b *testing.B) { benchmarkUnsafeMalloc(b, 1<<6) }
