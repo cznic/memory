@@ -79,12 +79,13 @@ type page struct {
 
 // Allocator allocates and frees memory. Its zero value is ready for use.
 type Allocator struct {
-	cap    [64]int
-	lists  [64]*node
-	pages  [64]*page
 	allocs int // # of allocs.
 	bytes  int // Asked from OS.
+	cap    [64]int
+	lists  [64]*node
 	mmaps  int // Asked from OS.
+	pages  [64]*page
+	regs   map[*page]struct{}
 }
 
 func (a *Allocator) newPage(size int) (*page, error) {
@@ -95,10 +96,10 @@ func (a *Allocator) newPage(size int) (*page, error) {
 	}
 
 	a.bytes += len(b)
-	a.mmaps++
 	p := (*page)(unsafe.Pointer(&b[0]))
 	p.size = len(b)
 	p.log = 0
+	a.reg(p)
 	return p, nil
 }
 
@@ -113,12 +114,25 @@ func (a *Allocator) newSharedPage(log uint) (*page, error) {
 	}
 
 	a.bytes += len(b)
-	a.mmaps++
 	p := (*page)(unsafe.Pointer(&b[0]))
 	a.pages[log] = p
 	p.size = len(b)
 	p.log = log
+	a.reg(p)
 	return p, nil
+}
+
+func (a *Allocator) reg(p *page) {
+	if a.regs == nil {
+		a.regs = map[*page]struct{}{}
+	}
+	a.regs[p] = struct{}{}
+	a.mmaps++
+}
+
+func (a *Allocator) unreg(p *page) {
+	delete(a.regs, p)
+	a.mmaps--
 }
 
 // Calloc is like Malloc except the allocated memory is zeroed.
@@ -143,6 +157,19 @@ func (a *Allocator) Calloc(size int) (r []byte, err error) {
 	return b, nil
 }
 
+// Close releases all OS resources used by a and sets it to its zero value.
+//
+// It's not necessary to Close the Allocator when exiting a process.
+func (a *Allocator) Close() (err error) {
+	for p := range a.regs {
+		if e := unmap(unsafe.Pointer(p), p.size); e != nil && err == nil {
+			err = e
+		}
+	}
+	*a = Allocator{}
+	return err
+}
+
 // Free deallocates memory (as in C.free). The argument of Free must have been
 // acquired from Calloc or Malloc or Realloc.
 func (a *Allocator) Free(b []byte) (err error) {
@@ -160,8 +187,8 @@ func (a *Allocator) Free(b []byte) (err error) {
 	p := (*page)(unsafe.Pointer(uintptr(unsafe.Pointer(&b[0])) &^ uintptr(pageMask)))
 	log := p.log
 	if log == 0 {
-		a.mmaps--
 		a.bytes -= p.size
+		a.unreg(p)
 		return unmap(unsafe.Pointer(p), p.size)
 	}
 
@@ -196,8 +223,8 @@ func (a *Allocator) Free(b []byte) (err error) {
 	if a.pages[log] == p {
 		a.pages[log] = nil
 	}
-	a.mmaps--
 	a.bytes -= p.size
+	a.unreg(p)
 	return unmap(unsafe.Pointer(p), p.size)
 }
 
@@ -356,8 +383,8 @@ func (a *Allocator) UnsafeFree(p unsafe.Pointer) (err error) {
 	pg := (*page)(unsafe.Pointer(uintptr(p) &^ uintptr(pageMask)))
 	log := pg.log
 	if log == 0 {
-		a.mmaps--
 		a.bytes -= pg.size
+		a.unreg(pg)
 		return unmap(unsafe.Pointer(pg), pg.size)
 	}
 
@@ -392,8 +419,8 @@ func (a *Allocator) UnsafeFree(p unsafe.Pointer) (err error) {
 	if a.pages[log] == pg {
 		a.pages[log] = nil
 	}
-	a.mmaps--
 	a.bytes -= pg.size
+	a.unreg(pg)
 	return unmap(unsafe.Pointer(pg), pg.size)
 }
 
