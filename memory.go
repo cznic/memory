@@ -88,18 +88,31 @@ type Allocator struct {
 	regs   map[*page]struct{}
 }
 
-func (a *Allocator) newPage(size int) (*page, error) {
-	size += headerSize
+func (a *Allocator) mmap(size int) (*page, error) {
 	b, err := mmap(size)
 	if err != nil {
 		return nil, err
 	}
 
+	a.mmaps++
 	a.bytes += len(b)
 	p := (*page)(unsafe.Pointer(&b[0]))
+	if a.regs == nil {
+		a.regs = map[*page]struct{}{}
+	}
 	p.size = len(b)
+	a.regs[p] = struct{}{}
+	return p, nil
+}
+
+func (a *Allocator) newPage(size int) (*page, error) {
+	size += headerSize
+	p, err := a.mmap(size)
+	if err != nil {
+		return nil, err
+	}
+
 	p.log = 0
-	a.reg(p)
 	return p, nil
 }
 
@@ -108,31 +121,20 @@ func (a *Allocator) newSharedPage(log uint) (*page, error) {
 		a.cap[log] = pageAvail / (1 << log)
 	}
 	size := headerSize + a.cap[log]<<log
-	b, err := mmap(size)
+	p, err := a.mmap(size)
 	if err != nil {
 		return nil, err
 	}
 
-	a.bytes += len(b)
-	p := (*page)(unsafe.Pointer(&b[0]))
 	a.pages[log] = p
-	p.size = len(b)
 	p.log = log
-	a.reg(p)
 	return p, nil
 }
 
-func (a *Allocator) reg(p *page) {
-	if a.regs == nil {
-		a.regs = map[*page]struct{}{}
-	}
-	a.regs[p] = struct{}{}
-	a.mmaps++
-}
-
-func (a *Allocator) unreg(p *page) {
+func (a *Allocator) unmap(p *page) error {
 	delete(a.regs, p)
 	a.mmaps--
+	return unmap(unsafe.Pointer(p), p.size)
 }
 
 // Calloc is like Malloc except the allocated memory is zeroed.
@@ -162,7 +164,7 @@ func (a *Allocator) Calloc(size int) (r []byte, err error) {
 // It's not necessary to Close the Allocator when exiting a process.
 func (a *Allocator) Close() (err error) {
 	for p := range a.regs {
-		if e := unmap(unsafe.Pointer(p), p.size); e != nil && err == nil {
+		if e := a.unmap(p); e != nil && err == nil {
 			err = e
 		}
 	}
@@ -188,8 +190,7 @@ func (a *Allocator) Free(b []byte) (err error) {
 	log := p.log
 	if log == 0 {
 		a.bytes -= p.size
-		a.unreg(p)
-		return unmap(unsafe.Pointer(p), p.size)
+		return a.unmap(p)
 	}
 
 	n := (*node)(unsafe.Pointer(&b[0]))
@@ -224,8 +225,7 @@ func (a *Allocator) Free(b []byte) (err error) {
 		a.pages[log] = nil
 	}
 	a.bytes -= p.size
-	a.unreg(p)
-	return unmap(unsafe.Pointer(p), p.size)
+	return a.unmap(p)
 }
 
 // Malloc allocates size bytes and returns a byte slice of the allocated
@@ -384,8 +384,7 @@ func (a *Allocator) UnsafeFree(p unsafe.Pointer) (err error) {
 	log := pg.log
 	if log == 0 {
 		a.bytes -= pg.size
-		a.unreg(pg)
-		return unmap(unsafe.Pointer(pg), pg.size)
+		return a.unmap(pg)
 	}
 
 	n := (*node)(p)
@@ -420,8 +419,7 @@ func (a *Allocator) UnsafeFree(p unsafe.Pointer) (err error) {
 		a.pages[log] = nil
 	}
 	a.bytes -= pg.size
-	a.unreg(pg)
-	return unmap(unsafe.Pointer(pg), pg.size)
+	return a.unmap(pg)
 }
 
 // UnsafeMalloc is like Malloc except it returns an unsafe.Pointer.
