@@ -185,6 +185,10 @@ func (a *Allocator) Free(b []byte) (err error) {
 		}()
 	}
 	b = b[:cap(b)]
+	if len(b) == 0 {
+		return nil
+	}
+
 	a.allocs--
 	p := (*page)(unsafe.Pointer(uintptr(unsafe.Pointer(&b[0])) &^ uintptr(pageMask)))
 	log := p.log
@@ -379,6 +383,10 @@ func (a *Allocator) UnsafeFree(p unsafe.Pointer) (err error) {
 			fmt.Fprintf(os.Stderr, "Free(%#x) %v\n", p, err)
 		}()
 	}
+	if p == nil {
+		return nil
+	}
+
 	a.allocs--
 	pg := (*page)(unsafe.Pointer(uintptr(p) &^ uintptr(pageMask)))
 	log := pg.log
