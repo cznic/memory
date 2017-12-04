@@ -15,23 +15,8 @@ import (
 
 var pageSize = 1 << 20
 
-func mmap0(size int) ([]byte, error) {
-	flags := syscall.MAP_SHARED | syscall.MAP_ANON
-	prot := syscall.PROT_READ | syscall.PROT_WRITE
-	b, err := syscall.Mmap(-1, 0, size, prot, flags)
-	if err != nil {
-		return nil, err
-	}
-
-	if uintptr(unsafe.Pointer(&b[0]))&uintptr(osPageMask) != 0 {
-		panic("internal error")
-	}
-
-	return b, nil
-}
-
-func unmap(addr unsafe.Pointer, size int) error {
-	_, _, errno := syscall.Syscall(syscall.SYS_MUNMAP, uintptr(addr), uintptr(size), 0)
+func unmap(addr uintptr, size int) error {
+	_, _, errno := syscall.Syscall(syscall.SYS_MUNMAP, addr, uintptr(size), 0)
 	if errno != 0 {
 		return errno
 	}
@@ -40,30 +25,40 @@ func unmap(addr unsafe.Pointer, size int) error {
 }
 
 // pageSize aligned.
-func mmap(size int) ([]byte, error) {
+func mmap(size int) (uintptr, int, error) {
 	size = roundup(size, osPageSize)
-	b, err := mmap0(size + pageSize)
+	b, err := syscall.Mmap(-1, 0, size+pageSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED|syscall.MAP_ANON)
 	if err != nil {
-		return nil, err
+		return 0, 0, err
 	}
 
-	mod := int(uintptr(unsafe.Pointer(&b[0]))) & pageMask
-	if mod != 0 {
-		n := pageSize - mod
-		if err := unmap(unsafe.Pointer(&b[0]), n); err != nil {
-			return nil, err
-		}
-
-		b = b[n:]
-	}
-
-	if uintptr(unsafe.Pointer(&b[0]))&uintptr(pageMask) != 0 {
+	n := len(b)
+	p := uintptr(unsafe.Pointer(&b[0]))
+	if p&uintptr(osPageMask) != 0 {
 		panic("internal error")
 	}
 
-	if err := unmap(unsafe.Pointer(&b[size]), len(b)-size); err != nil {
-		return nil, err
+	mod := int(p) & pageMask
+	if mod != 0 {
+		m := pageSize - mod
+		if err := unmap(p, m); err != nil {
+			return 0, 0, err
+		}
+
+		b = b[m:]
+		n -= m
+		p += uintptr(m)
 	}
 
-	return b[:size:size], nil
+	if p&uintptr(pageMask) != 0 {
+		panic("internal error")
+	}
+
+	if n-size != 0 {
+		if err := unmap(p+uintptr(size), n-size); err != nil {
+			return 0, 0, err
+		}
+	}
+
+	return p, size, nil
 }

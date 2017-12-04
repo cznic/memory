@@ -89,20 +89,20 @@ type Allocator struct {
 }
 
 func (a *Allocator) mmap(size int) (*page, error) {
-	b, err := mmap(size)
+	p, size, err := mmap(size)
 	if err != nil {
 		return nil, err
 	}
 
 	a.mmaps++
-	a.bytes += len(b)
-	p := (*page)(unsafe.Pointer(&b[0]))
+	a.bytes += size
+	pg := (*page)(unsafe.Pointer(p))
 	if a.regs == nil {
 		a.regs = map[*page]struct{}{}
 	}
-	p.size = len(b)
-	a.regs[p] = struct{}{}
-	return p, nil
+	pg.size = size
+	a.regs[pg] = struct{}{}
+	return pg, nil
 }
 
 func (a *Allocator) newPage(size int) (*page, error) {
@@ -134,7 +134,7 @@ func (a *Allocator) newSharedPage(log uint) (*page, error) {
 func (a *Allocator) unmap(p *page) error {
 	delete(a.regs, p)
 	a.mmaps--
-	return unmap(unsafe.Pointer(p), p.size)
+	return unmap(uintptr(unsafe.Pointer(p)), p.size)
 }
 
 // Calloc is like Malloc except the allocated memory is zeroed.

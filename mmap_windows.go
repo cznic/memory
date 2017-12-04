@@ -29,27 +29,14 @@ var (
 )
 
 // pageSize aligned.
-func mmap(size int) ([]byte, error) {
+func mmap(size int) (uintptr, int, error) {
 	size = roundup(size, pageSize)
 	addr, _, err := procVirtualAlloc.Call(0, uintptr(size), _MEM_COMMIT|_MEM_RESERVE, _PAGE_READWRITE)
-	if addr == 0 {
-		return nil, err
-	}
-
-	if addr&uintptr(pageMask) != 0 {
-		panic("internal error")
-	}
-
-	var b []byte
-	sh := (*reflect.SliceHeader)(unsafe.Pointer(&b))
-	sh.Data = addr
-	sh.Len = size
-	sh.Cap = size
-	return b, nil
+	return addr, size, err
 }
 
-func unmap(addr unsafe.Pointer, size int) error {
-	r, _, err := procVirtualFree.Call(uintptr(addr), 0, _MEM_RELEASE)
+func unmap(addr uintptr, size int) error {
+	r, _, err := procVirtualFree.Call(addr, 0, _MEM_RELEASE)
 	if r == 0 {
 		return err
 	}
