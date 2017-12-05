@@ -5,9 +5,7 @@
 package memory
 
 import (
-	"reflect"
 	"syscall"
-	"unsafe"
 )
 
 const (
