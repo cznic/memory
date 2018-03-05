@@ -34,8 +34,9 @@ edit:
 editor:
 	gofmt -l -s -w *.go
 	go test -i
+	GOARCH=386 go build
+	GOARCH=amd64 go build
 	go test 2>&1 | tee log
-	go build
 
 internalError:
 	egrep -ho '"internal error.*"' *.go | sort | cat -n

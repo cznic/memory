@@ -49,10 +49,7 @@ import (
 	"github.com/cznic/mathutil"
 )
 
-const (
-	mallocAllign = 16 // Must be >= 16
-	intBits      = 1 << (^uint(0)>>32&1 + ^uint(0)>>16&1 + ^uint(0)>>8&1 + 3)
-)
+const mallocAllign = 16 // Must be >= 16
 
 var (
 	headerSize  = roundup(int(unsafe.Sizeof(page{})), mallocAllign)
@@ -147,18 +144,9 @@ func (a *Allocator) UintptrCalloc(size int) (r uintptr, err error) {
 	if r, err = a.UintptrMalloc(size); r == 0 || err != nil {
 		return 0, err
 	}
-
-	switch {
-	case intBits > 32:
-		b := ((*[1 << 49]byte)(unsafe.Pointer(r)))[:size]
-		for i := range b {
-			b[i] = 0
-		}
-	default:
-		b := ((*[1 << 31]byte)(unsafe.Pointer(r)))[:size]
-		for i := range b {
-			b[i] = 0
-		}
+	b := ((*rawmem)(unsafe.Pointer(r)))[:size]
+	for i := range b {
+		b[i] = 0
 	}
 	return r, nil
 }
@@ -297,12 +285,7 @@ func (a *Allocator) UintptrRealloc(p uintptr, size int) (r uintptr, err error) {
 	if us < size {
 		size = us
 	}
-	switch {
-	case intBits > 32:
-		copy((*[1 << 49]byte)(unsafe.Pointer(r))[:size], (*[1 << 49]byte)(unsafe.Pointer(p))[:size])
-	default:
-		copy((*[1 << 31]byte)(unsafe.Pointer(r))[:size], (*[1 << 31]byte)(unsafe.Pointer(p))[:size])
-	}
+	copy((*rawmem)(unsafe.Pointer(r))[:size], (*rawmem)(unsafe.Pointer(p))[:size])
 	return r, a.UintptrFree(p)
 }
 
@@ -312,7 +295,7 @@ func (a *Allocator) UintptrRealloc(p uintptr, size int) (r uintptr, err error) {
 func UintptrUsableSize(p uintptr) (r int) {
 	if trace {
 		defer func() {
-			fmt.Fprintf(os.Stderr, "UsableSize(%p) %#x\n", p, r)
+			fmt.Fprintf(os.Stderr, "UsableSize(%#x) %#x\n", p, r)
 		}()
 	}
 	if p == 0 {
