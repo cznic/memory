@@ -30,7 +30,10 @@ var (
 func mmap(size int) (uintptr, int, error) {
 	size = roundup(size, pageSize)
 	addr, _, err := procVirtualAlloc.Call(0, uintptr(size), _MEM_COMMIT|_MEM_RESERVE, _PAGE_READWRITE)
-	return addr, size, err
+	if err.(syscall.Errno) != 0 || addr == 0 {
+		return addr, size, err
+	}
+	return addr, size, nil
 }
 
 func unmap(addr uintptr, size int) error {
