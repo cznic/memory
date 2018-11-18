@@ -1,9 +1,5 @@
-# memory
+`github.com/cznic/memory` has moved to `modernc.org/memory` (hosted at http://gitlab.com/cznic/memory).
 
-Package memory implements a memory allocator.
+Please update your import paths to `modernc.org/memory`.
 
-Installation
-
-    $ go get github.com/cznic/memory
-
-Documentation: [godoc.org/github.com/cznic/memory](http://godoc.org/github.com/cznic/memory)
+This repo is read-only.
