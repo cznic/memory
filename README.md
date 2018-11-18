@@ -1,4 +1,4 @@
-`github.com/cznic/memory` has moved to [`modernc.org/memory`](https://godoc.org/modernc.org/memory) (hosted at https://gitlab.com/cznic/memory).
+`github.com/cznic/memory` has moved to [`modernc.org/memory`](https://godoc.org/modernc.org/memory) ([vcs](https://gitlab.com/cznic/memory)).
 
 Please update your import paths to `modernc.org/memory`.
 
