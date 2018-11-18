@@ -2,4 +2,4 @@
 
 Please update your import paths to `modernc.org/memory`.
 
-This repo is read-only.
+This repo is now archived.
